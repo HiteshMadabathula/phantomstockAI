@@ -237,6 +237,73 @@ def test_authentication_and_authorization():
     status_after_logout = client.get("/api/status", headers=headers)
     assert status_after_logout.status_code == 401
 
+def test_bearer_token_variations():
+    # Login to get valid token
+    login_res = client.post("/api/auth/login", json={
+        "email": "manager@retailcorp.demo",
+        "password": "password123"
+    })
+    token = login_res.json()["token"]
+
+    # 1. Lowercase bearer prefix should succeed
+    res_lower = client.get("/api/status", headers={"Authorization": f"bearer {token}"})
+    assert res_lower.status_code == 200
+
+    # 2. Extra spaces should succeed
+    res_spaces = client.get("/api/status", headers={"Authorization": f"Bearer   {token}"})
+    assert res_spaces.status_code == 200
+
+    # 3. Invalid scheme should fail with 401
+    res_invalid = client.get("/api/status", headers={"Authorization": f"Basic {token}"})
+    assert res_invalid.status_code == 401
+
+def test_n8n_alerts_token_workflow():
+    # 1. Test missing Authorization header -> 401 Missing or invalid token format
+    res_missing = client.get("/api/alerts?date=2026-09-01&store_id=STORE_001")
+    assert res_missing.status_code == 401
+    assert "Missing or invalid token format" in res_missing.json()["detail"]
+
+    # 2. Test malformed Authorization header -> 401 Missing or invalid token format
+    res_malformed = client.get("/api/alerts?date=2026-09-01&store_id=STORE_001", headers={"Authorization": "Basic some-token"})
+    assert res_malformed.status_code == 401
+    assert "Missing or invalid token format" in res_malformed.json()["detail"]
+
+    # 3. Login to get valid token
+    login_res = client.post("/api/auth/login", json={
+        "email": "manager@retailcorp.demo",
+        "password": "password123"
+    })
+    assert login_res.status_code == 200
+    login_data = login_res.json()
+    token = login_data.get("token")
+    assert token is not None
+    assert isinstance(token, str)
+    assert len(token) > 0
+
+    # 4. Test invalid token -> 401 Invalid or expired session token
+    res_invalid_token = client.get("/api/alerts?date=2026-09-01&store_id=STORE_001", headers={"Authorization": "Bearer non-existent-token-string"})
+    assert res_invalid_token.status_code == 401
+    assert "Invalid or expired session token" in res_invalid_token.json()["detail"]
+
+    # 5. Get status to find available dates and authorized stores
+    status_res = client.get("/api/status", headers={"Authorization": f"Bearer {token}"})
+    assert status_res.status_code == 200
+    status_json = status_res.json()
+    dates = status_json.get("available_dates", [])
+    stores = status_json.get("stores", ["STORE_001"])
+
+    date_str = dates[0] if dates else "2026-09-01"
+    store_id = stores[0] if stores else "STORE_001"
+
+    # 6. Real authenticated GET /api/alerts call with extracted token using Authorization: Bearer <token> and required query params
+    alerts_res = client.get(
+        f"/api/alerts?date={date_str}&store_id={store_id}&limit=20",
+        headers={"Authorization": f"Bearer {token.strip()}"}
+    )
+    assert alerts_res.status_code == 200
+    alerts_data = alerts_res.json()
+    assert isinstance(alerts_data, list)
+
 def test_evaluation_endpoint_security():
     # 1. Unauthenticated evaluation run should fail with 401
     res_unauth = client.post("/api/evaluation/run")

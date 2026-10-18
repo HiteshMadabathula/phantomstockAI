@@ -12,7 +12,7 @@ import hashlib
 import secrets
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Body, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Body, Depends, Header, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,10 +92,19 @@ def init_db():
 
 init_db()
 
-def get_current_user(authorization: Optional[str] = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
+def get_current_user(request: Request):
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    has_header = bool(auth_header)
+    parts = auth_header.split() if auth_header else []
+    is_bearer = (len(parts) >= 1 and parts[0].lower() == "bearer")
+    parts_count = len(parts)
+    print(f"[DIAGNOSTIC] Auth check: present={has_header}, is_bearer={is_bearer}, parts_count={parts_count}")
+
+    if not auth_header:
         raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token format")
-    token = authorization.split(" ")[1]
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token format")
+    token = parts[1]
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -156,14 +165,17 @@ def login(req: LoginRequest):
     }
 
 @app.post("/api/auth/logout")
-def logout(authorization: Optional[str] = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
-        conn.commit()
-        conn.close()
+def logout(request: Request):
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth_header:
+        parts = auth_header.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
+            conn.commit()
+            conn.close()
     return {"status": "success", "message": "Logged out successfully"}
 
 @app.get("/api/auth/me")
