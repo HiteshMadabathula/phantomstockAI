@@ -257,6 +257,41 @@ def test_bearer_token_variations():
     res_invalid = client.get("/api/status", headers={"Authorization": f"Basic {token}"})
     assert res_invalid.status_code == 401
 
+def test_analytics_and_metrics_endpoints():
+    login_res = client.post("/api/auth/login", json={
+        "email": "manager@retailcorp.demo",
+        "password": "password123"
+    })
+    token = login_res.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Test /api/status
+    res_status = client.get("/api/status", headers=headers)
+    assert res_status.status_code == 200
+    status_json = res_status.json()
+    assert "stores" in status_json
+    assert "available_dates" in status_json
+
+    date_str = status_json["available_dates"][0]
+    store_id = status_json["stores"][0]
+
+    # Test /api/store-trend
+    res_trend = client.get(f"/api/store-trend?store_id={store_id}", headers=headers)
+    assert res_trend.status_code == 200
+    assert isinstance(res_trend.json(), list)
+
+    # Test /api/alerts
+    res_alerts = client.get(f"/api/alerts?date={date_str}&store_id={store_id}&limit=20", headers=headers)
+    assert res_alerts.status_code == 200
+    assert isinstance(res_alerts.json(), list)
+
+    # Test /api/evaluation/metrics
+    res_metrics = client.get("/api/evaluation/metrics", headers=headers)
+    assert res_metrics.status_code == 200
+    metrics_json = res_metrics.json()
+    assert "precision_at_20" in metrics_json
+    assert "recall" in metrics_json
+
 def test_n8n_alerts_token_workflow():
     # 1. Test missing Authorization header -> 401 Missing or invalid token format
     res_missing = client.get("/api/alerts?date=2026-09-01&store_id=STORE_001")

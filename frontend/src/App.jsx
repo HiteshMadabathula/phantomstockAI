@@ -240,6 +240,7 @@ export default function App() {
       const res = await fetch('/api/evaluation/metrics', {
         headers: { 'Authorization': `Bearer ${activeToken}` }
       });
+      if (!res.ok) throw new Error("Failed to fetch metrics");
       const data = await res.json();
       setMetrics(data);
     } catch (err) {

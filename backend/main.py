@@ -92,6 +92,28 @@ def init_db():
 
 init_db()
 
+def ensure_data():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(SALES_PATH) or not os.path.exists(TRUTH_PATH):
+        try:
+            import sys
+            project_dir = Path(__file__).resolve().parent.parent
+            if str(project_dir) not in sys.path:
+                sys.path.append(str(project_dir))
+            from scripts.generate_data import generate_dataset
+            generate_dataset(DATA_DIR)
+        except Exception as e:
+            print(f"Error generating dataset: {e}")
+    if not os.path.exists(PREDS_PATH) or not os.path.exists(SALES_PATH):
+        try:
+            from detector.engine import run_detection
+            if os.path.exists(SALES_PATH):
+                run_detection(sales_path=SALES_PATH, output_path=PREDS_PATH)
+        except Exception as e:
+            print(f"Error running detection engine: {e}")
+
+ensure_data()
+
 def get_current_user(request: Request):
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     has_header = bool(auth_header)
@@ -370,6 +392,8 @@ def get_evaluation_metrics():
     # Note: Returns intentionally public aggregate hackathon evaluation metrics (Precision@20, recall, aggregate store-days, methodology).
     # Contains no store-level PII or unredacted sensitive vendor data, suitable for public dashboard status views.
     try:
+        if not os.path.exists(PREDS_PATH) or not os.path.exists(TRUTH_PATH):
+            ensure_data()
         import evaluate
         metrics = evaluate.evaluate(PREDS_PATH, TRUTH_PATH)
         # Calculate realistic annual recovery: ~268 phantoms identified over 150 store-days.
@@ -384,15 +408,16 @@ def get_evaluation_metrics():
             "annual_recovery_estimate_usd": annual_recovery,
             "methodology": "Annual recovery estimated based on verified phantom stock-outs prevented from leading to lost customer visits, calculated as (Identified Phantoms / Store-Days) * Store Traffic Factor * Average SKU Gross Margin."
         }
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         return {
+            "status": "fallback",
             "precision_at_20": 0.0893,
             "recall": 1.000,
             "store_days_evaluated": 150,
             "total_true_phantoms": 268,
             "identified_phantoms": 268,
             "annual_recovery_estimate_usd": 45192.00,
-            "methodology": "Baseline projection model."
+            "methodology": "Fallback demo projection model (live evaluation dataset unavailable)."
         }
 
 
